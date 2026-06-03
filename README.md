@@ -41,7 +41,8 @@ Desktop: `s` switch · `r` reset · drag to rub · click to tap.
 ## Built / not built
 
 **In:** menu→zoom-fall→vignette, charcoal (rub) + pixel (tap), swipe/wheel switching,
-carried physics, win→changed menu, hint ladder, soft "destabilise" on rapid switching.
+carried physics, win→changed menu, hint ladder, soft "destabilise" on rapid switching,
+**two vignettes** (Lantern Frame · Lantern, Relit) with the second unlocked on win.
 
 **Deferred (per GDD):** Neon/Oil/Collage, Fixative, audio, save, the other menu skins,
-more vignettes, narrative. Staged in after this engine proves fun on a thumb.
+the third vignette, narrative. Staged in after this engine proves fun on a thumb.

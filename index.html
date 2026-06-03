@@ -26,16 +26,22 @@ let DPR = 1, view = { scale: 1, ox: 0, oy: 0 }, hudH = 0;
 const MENU = 'menu', PLAY = 'play';
 let screen = MENU;
 let trans = null;             // {t, from, dir} zoom-fall transition
-let solved = false;           // has the Lantern Frame been finished
-let st = E.createState();     // engine state for the vignette
+const finished = new Set();   // frame ids that have been completed
+let currentFrameId = 'lantern';
+let st = E.createState(currentFrameId);
 let toast = '', toastT = 0;
 
-// menu frames (the Hollow gallery)
+// menu frames (the Hollow gallery). Playability is derived from `finished`.
 const frames = [
-  { id: 'lantern', title: 'The Lantern Frame', sub: 'i.', playable: true },
-  { id: 'relit',   title: 'The Lantern, Relit', sub: 'ii.', playable: false },
-  { id: 'hollow3', title: 'unpainted',          sub: 'iii.', playable: false },
+  { id: 'lantern', title: 'The Lantern Frame', sub: 'i.' },
+  { id: 'relit',   title: 'The Lantern, Relit', sub: 'ii.' },
+  { id: 'hollow3', title: 'unpainted',          sub: 'iii.' },
 ];
+function isPlayable(f){
+  if (f.id === 'lantern') return true;
+  if (f.id === 'relit')   return finished.has('lantern');
+  return false;
+}
 
 // ---- layout ----
 function resize() {
@@ -100,7 +106,7 @@ function handleTap(x, y) {
   if (screen === MENU) {
     const r = frameRects();
     for (let i = 0; i < frames.length; i++) {
-      if (frames[i].playable && pointIn(r[i], x, y)) { startTransition(r[i]); return; }
+      if (isPlayable(frames[i]) && pointIn(r[i], x, y)) { startTransition(r[i], frames[i].id); return; }
     }
     return;
   }
@@ -108,7 +114,7 @@ function handleTap(x, y) {
   if (st.won) { exitToMenu(); return; }
   if (hit(wheelBtn(), x, y)) { doSwitch(); return; }
   if (pointIn(backBtn(), x, y)) { exitToMenu(); return; }
-  if (pointIn(resetBtn(), x, y)) { st = E.createState(); flash('Reset.'); return; }
+  if (pointIn(resetBtn(), x, y)) { st = E.createState(currentFrameId); flash('Reset.'); return; }
   // pixel tap-to-snap
   if (st.style === 'pixel') {
     const s = toScene(x, y);
@@ -118,7 +124,7 @@ function handleTap(x, y) {
 function doSwitch(){ if (screen === PLAY && !st.won) { E.cycleStyle(st); flash(st.style === 'pixel' ? 'PIXEL — the world quantizes.' : 'CHARCOAL — only linework is solid.'); } }
 window.addEventListener('keydown', e => {            // desktop helpers
   if (e.key === 's') doSwitch();
-  if (e.key === 'r' && screen === PLAY) { st = E.createState(); }
+  if (e.key === 'r' && screen === PLAY) { st = E.createState(currentFrameId); }
   if (e.key === 'Escape' && screen === PLAY) exitToMenu();
 });
 
@@ -126,8 +132,8 @@ function pointIn(r, x, y){ return x >= r.x && x <= r.x + r.w && y >= r.y && y <=
 function flash(m){ toast = m; toastT = 2.4; }
 
 // ---- transitions ----
-function startTransition(r){ trans = { t: 0, from: r, dir: 1 }; }
-function exitToMenu(){ if (st.won) solved = true; screen = MENU; st = E.createState(); }
+function startTransition(r, id){ trans = { t: 0, from: r, dir: 1, id }; }
+function exitToMenu(){ if (st.won) finished.add(currentFrameId); screen = MENU; st = E.createState(currentFrameId); }
 
 // ---- loop ----
 let last = performance.now();
@@ -140,7 +146,7 @@ function update(dt){
   if (toastT > 0) toastT -= dt;
   if (trans){
     trans.t += dt * 2.2;
-    if (trans.t >= 1){ trans = null; screen = PLAY; st = E.createState(); }
+    if (trans.t >= 1){ currentFrameId = trans.id; trans = null; screen = PLAY; st = E.createState(currentFrameId); }
   }
   if (screen === PLAY && !trans){
     E.stepPhysics(st, dt);
@@ -185,41 +191,52 @@ function renderMenu(){
   const r = frameRects();
   frames.forEach((f, i) => {
     const b = r[i];
-    const finished = f.id === 'lantern' && solved;
-    // eraser-ghost: unplayable frames breathe and fade
-    const ghost = !f.playable;
+    const playable = isPlayable(f);
+    const isFin = finished.has(f.id);
+    const ghost = !playable;
     const a = ghost ? 0.30 + 0.16*Math.sin(t*1.3 + i) : 1;
     ctx.globalAlpha = a;
-    ctx.lineWidth = 2; ctx.strokeStyle = finished ? '#d9c27a' : '#cdc8bd';
+    ctx.lineWidth = 2; ctx.strokeStyle = isFin ? '#d9c27a' : '#cdc8bd';
     ctx.setLineDash(ghost ? [5,6] : []);
     sketchRect(b.x, b.y, b.w, b.h);
     ctx.setLineDash([]);
     // thumbnail glyph
-    if (f.playable){
-      drawFrameThumb(b, finished);
-    }
-    ctx.fillStyle = ghost ? '#6f6a61' : (finished ? '#d9c27a' : '#e9e6df');
+    if (playable) drawFrameThumb(b, f, isFin);
+    ctx.fillStyle = ghost ? '#6f6a61' : (isFin ? '#d9c27a' : '#e9e6df');
     ctx.textAlign = 'left';
     ctx.font = `600 ${Math.round(b.h*0.17)}px ui-monospace,monospace`;
-    ctx.fillText(f.sub + '  ' + (ghost ? '— unpainted —' : f.title), b.x + 14, b.y + b.h - 16);
-    if (finished){ ctx.textAlign='right'; ctx.fillText('✓ finished', b.x + b.w - 14, b.y + 26); }
+    const ghostLabel = f.id === 'hollow3' ? '— unpainted —' : '— locked —';
+    ctx.fillText(f.sub + '  ' + (ghost ? ghostLabel : f.title), b.x + 14, b.y + b.h - 16);
+    if (isFin){ ctx.textAlign='right'; ctx.fillText('✓ finished', b.x + b.w - 14, b.y + 26); }
     ctx.globalAlpha = 1;
   });
   ctx.textAlign = 'center'; ctx.fillStyle = '#6f6a61';
   ctx.font = `${Math.round(Math.min(W*0.033,15))}px ui-monospace,monospace`;
-  ctx.fillText(solved ? 'the gallery has changed.' : 'tap a frame to fall in', W/2, H*0.93);
+  ctx.fillText(finished.size > 0 ? 'the gallery has changed.' : 'tap a frame to fall in', W/2, H*0.93);
   ctx.textAlign = 'left';
 }
-function drawFrameThumb(b, finished){
-  // tiny charcoal sketch of the puzzle: ledge, gap, door
-  ctx.save(); ctx.globalAlpha *= 0.85; ctx.strokeStyle = finished ? '#d9c27a' : '#9d978c'; ctx.lineWidth = 2;
+function drawFrameThumb(b, f, isFin){
+  // tiny charcoal sketch of the puzzle
+  ctx.save(); ctx.globalAlpha *= 0.85; ctx.strokeStyle = isFin ? '#d9c27a' : '#9d978c'; ctx.lineWidth = 2;
   const px = b.x + 22, py = b.y + b.h*0.34, ww = b.w - 44, hh = b.h*0.32;
-  ctx.beginPath();
-  ctx.moveTo(px, py); ctx.lineTo(px+ww*0.34, py+hh*0.25);
-  ctx.moveTo(px+ww*0.62, py+hh*0.8); ctx.lineTo(px+ww*0.84, py+hh*0.9);
-  ctx.stroke();
-  ctx.strokeRect(px+ww*0.82, py+hh*0.35, ww*0.13, hh*0.6); // door
-  ctx.beginPath(); ctx.arc(px+6, py-4, 4, 0, 7); ctx.stroke(); // figure
+  if (f.id === 'lantern'){
+    ctx.beginPath();
+    ctx.moveTo(px, py); ctx.lineTo(px+ww*0.34, py+hh*0.25);
+    ctx.moveTo(px+ww*0.62, py+hh*0.8); ctx.lineTo(px+ww*0.84, py+hh*0.9);
+    ctx.stroke();
+    ctx.strokeRect(px+ww*0.82, py+hh*0.35, ww*0.13, hh*0.6); // door
+    ctx.beginPath(); ctx.arc(px+6, py-4, 4, 0, 7); ctx.stroke(); // figure
+  } else if (f.id === 'relit'){
+    // two ledges + landing, two blocks bracketing a gap
+    ctx.beginPath();
+    ctx.moveTo(px, py-hh*0.05); ctx.lineTo(px+ww*0.42, py+hh*0.05);
+    ctx.moveTo(px, py+hh*0.5);  ctx.lineTo(px+ww*0.5,  py+hh*0.6);
+    ctx.moveTo(px+ww*0.78, py+hh*0.9); ctx.lineTo(px+ww, py+hh);
+    ctx.stroke();
+    ctx.strokeRect(px+ww*0.35, py-hh*0.15, ww*0.08, hh*0.2); // block A
+    ctx.strokeRect(px+ww*0.78, py+hh*0.7,  ww*0.06, hh*0.2); // block B
+    ctx.beginPath(); ctx.arc(px+4, py-hh*0.12, 3.5, 0, 7); ctx.stroke(); // figure
+  }
   ctx.restore();
 }
 function renderTransition(){
@@ -259,79 +276,96 @@ function hatch(r, alpha){
 
 function renderCharcoal(){
   paper(0, 0, W, H - hudH, true);
+  const sc = E.getScene(st);
   ctx.strokeStyle = '#d8d3c8'; ctx.lineWidth = 2; ctx.lineCap = 'round';
   // static linework
-  line(10,50,42,56); line(10,30,10,56); line(70,96,110,103); line(110,80,110,103);
-  // the gap as an erased hole (only meaningful in charcoal) when not snapped
-  if (!st.snapped){
-    ctx.save(); ctx.globalAlpha=0.5; ctx.fillStyle='#171513';
-    ctx.beginPath(); ctx.ellipse(SX(E.GAP.x+E.GAP.w/2), SY(E.GAP.y+E.GAP.h*0.75), S(E.GAP.w*0.5), S(E.GAP.h*0.42),0,0,7); ctx.fill();
-    ctx.globalAlpha=0.3; ctx.strokeStyle='#7d776c'; ctx.setLineDash([3,4]);
-    ctx.stroke(); ctx.setLineDash([]); ctx.restore();
-  } else { renderRamp('#bdb8ad'); }
-  // inked block (erasable) — hatch fades with rub progress
-  if (!st.erased){
-    const prog = Math.min(1, st.rub / 26);
+  for (const sg of sc.staticSegs) line(sg.x1, sg.y1, sg.x2, sg.y2);
+  // gaps — erased hole or snapped ramp
+  sc.gaps.forEach((g, i) => {
+    if (!st.snapped[i]){
+      ctx.save(); ctx.globalAlpha=0.5; ctx.fillStyle='#171513';
+      ctx.beginPath(); ctx.ellipse(SX(g.x+g.w/2), SY(g.y+g.h*0.75), S(g.w*0.5), S(g.h*0.42),0,0,7); ctx.fill();
+      ctx.globalAlpha=0.3; ctx.strokeStyle='#7d776c'; ctx.setLineDash([3,4]);
+      ctx.stroke(); ctx.setLineDash([]); ctx.restore();
+    } else {
+      ctx.strokeStyle = '#bdb8ad'; ctx.lineWidth = 2;
+      line(g.ramp.x1, g.ramp.y1, g.ramp.x2, g.ramp.y2);
+    }
+  });
+  // inked blocks — hatch fades with rub progress
+  sc.blocks.forEach((b, i) => {
+    if (st.erased[i]) return;
+    const prog = Math.min(1, st.rub[i] / 26);
     ctx.strokeStyle = '#d8d3c8'; ctx.lineWidth = 2;
-    ctx.strokeRect(SX(E.BLOCK.x),SY(E.BLOCK.y),S(E.BLOCK.w),S(E.BLOCK.h));
-    hatch(E.BLOCK, 0.9*(1-prog));
-    if (prog>0){ ctx.fillStyle=`rgba(120,114,104,${0.25*prog})`; ctx.fillRect(SX(E.BLOCK.x-2),SY(E.BLOCK.y-2),S(E.BLOCK.w+4),S(E.BLOCK.h+4)); }
-    if (touchingBlock()) glowRect(E.BLOCK);
-  }
-  // door — only an OUTLINE (passable). sketch an arch.
-  ctx.save(); ctx.globalAlpha=0.7; ctx.strokeStyle='#a39d92'; ctx.lineWidth=2;
-  ctx.strokeRect(SX(E.DOOR.x),SY(E.DOOR.y),S(E.DOOR.w),S(E.DOOR.h));
-  ctx.beginPath(); ctx.moveTo(SX(E.DOOR.x),SY(E.DOOR.y)); ctx.quadraticCurveTo(SX(E.DOOR.x+E.DOOR.w/2),SY(E.DOOR.y-5),SX(E.DOOR.x+E.DOOR.w),SY(E.DOOR.y)); ctx.stroke();
-  ctx.restore();
-  goalMark('#d9c27a');
+    ctx.strokeRect(SX(b.x),SY(b.y),S(b.w),S(b.h));
+    hatch(b, 0.9*(1-prog));
+    if (prog>0){ ctx.fillStyle=`rgba(120,114,104,${0.25*prog})`; ctx.fillRect(SX(b.x-2),SY(b.y-2),S(b.w+4),S(b.h+4)); }
+    if (touchingBlock(b)) glowRect(b);
+  });
+  // doors — passable outline (an arched sketch)
+  sc.doors.forEach(d => {
+    ctx.save(); ctx.globalAlpha=0.7; ctx.strokeStyle='#a39d92'; ctx.lineWidth=2;
+    ctx.strokeRect(SX(d.x),SY(d.y),S(d.w),S(d.h));
+    ctx.beginPath(); ctx.moveTo(SX(d.x),SY(d.y)); ctx.quadraticCurveTo(SX(d.x+d.w/2),SY(d.y-5),SX(d.x+d.w),SY(d.y)); ctx.stroke();
+    ctx.restore();
+  });
+  goalMark(sc.goal, '#d9c27a');
   drawFigureCharcoal();
-}
-function renderRamp(col){
-  ctx.strokeStyle = col; ctx.lineWidth = 2; line(E.RAMP.x1,E.RAMP.y1,E.RAMP.x2,E.RAMP.y2);
 }
 
 function renderPixel(){
-  const cell = 2.2;
+  const sc = E.getScene(st);
   paper(0,0,W,H-hudH,false);
   ctx.fillStyle = '#141a2e'; ctx.fillRect(0,0,W,H-hudH);
   // dither field
   ctx.globalAlpha=0.06; ctx.fillStyle='#3a4a7a';
   for (let y=0;y<H-hudH;y+=6) for (let x=(y/6%2?3:0);x<W;x+=6) ctx.fillRect(x,y,3,3);
   ctx.globalAlpha=1;
-  const blk=(r,c)=>{ ctx.fillStyle=c; ctx.fillRect(SX(r.x),SY(r.y),S(r.w),S(r.h));
-    ctx.fillStyle='rgba(255,255,255,0.12)'; ctx.fillRect(SX(r.x),SY(r.y),S(r.w),S(2)); };
-  // platforms as chunky blocks
-  pxSeg(10,50,42,56,'#3b6e57'); pxSeg(70,96,110,103,'#3b6e57');
-  ctx.fillStyle='#26405f'; ctx.fillRect(SX(8),SY(56),S(34),S(8));
-  ctx.fillRect(SX(70),SY(103),S(40),S(8));
-  // gap: shimmering quantizable region (not snapped) or stepped staircase (snapped)
-  if (!st.snapped){
-    const a = 0.35 + 0.25*Math.sin(performance.now()/180);
-    ctx.fillStyle=`rgba(120,200,255,${a})`;
-    for (let gx=E.GAP.x; gx<E.GAP.x+E.GAP.w; gx+=4)
-      for (let gy=E.GAP.y+8; gy<E.GAP.y+E.GAP.h; gy+=4)
-        if ((gx+gy)%8<4) ctx.fillRect(SX(gx),SY(gy),S(3),S(3));
-    glowRect(E.GAP);
-  } else {
-    // stepped staircase visual over the ramp
-    const steps=5;
-    for (let i=0;i<steps;i++){
-      const t0=i/steps, t1=(i+1)/steps;
-      const x=E.RAMP.x1+(E.RAMP.x2-E.RAMP.x1)*t0, y=E.RAMP.y1+(E.RAMP.y2-E.RAMP.y1)*t1;
-      const w=(E.RAMP.x2-E.RAMP.x1)/steps;
-      ctx.fillStyle='#3b6e57'; ctx.fillRect(SX(x),SY(y-2),S(w+0.5),S((H)));
-      ctx.fillStyle='rgba(255,255,255,0.14)'; ctx.fillRect(SX(x),SY(y-2),S(w+0.5),S(1.6));
+  // static segs: horizontal = platform bar + underbelly; vertical = thin column
+  for (const sg of sc.staticSegs){
+    if (sg.x1 !== sg.x2){
+      pxSeg(sg.x1, sg.y1, sg.x2, sg.y2, '#3b6e57');
+      const maxY = Math.max(sg.y1, sg.y2);
+      ctx.fillStyle = '#26405f';
+      ctx.fillRect(SX(sg.x1), SY(maxY+4), S(sg.x2-sg.x1), S(8));
+    } else {
+      ctx.fillStyle = '#26405f';
+      const y0 = Math.min(sg.y1, sg.y2), h0 = Math.abs(sg.y2-sg.y1);
+      ctx.fillRect(SX(sg.x1-1.5), SY(y0), S(3), S(h0));
     }
   }
-  if (!st.erased) blk(E.BLOCK,'#7a5a8f');            // solid crate
-  blk(E.DOOR,'#d24b4b');                              // solid slab
-  goalMark('#ffd76a');
+  // gaps: shimmering region or stepped staircase
+  sc.gaps.forEach((g, i) => {
+    if (!st.snapped[i]){
+      const a = 0.35 + 0.25*Math.sin(performance.now()/180);
+      ctx.fillStyle=`rgba(120,200,255,${a})`;
+      for (let gx=g.x; gx<g.x+g.w; gx+=4)
+        for (let gy=g.y+8; gy<g.y+g.h; gy+=4)
+          if ((gx+gy)%8<4) ctx.fillRect(SX(gx),SY(gy),S(3),S(3));
+      glowRect(g);
+    } else {
+      const r = g.ramp;
+      const steps = 5;
+      for (let k=0;k<steps;k++){
+        const t0=k/steps, t1=(k+1)/steps;
+        const x=r.x1+(r.x2-r.x1)*t0, y=r.y1+(r.y2-r.y1)*t1;
+        const w=(r.x2-r.x1)/steps;
+        ctx.fillStyle='#3b6e57'; ctx.fillRect(SX(x),SY(y-2),S(w+0.5),S(H));
+        ctx.fillStyle='rgba(255,255,255,0.14)'; ctx.fillRect(SX(x),SY(y-2),S(w+0.5),S(1.6));
+      }
+    }
+  });
+  const blk=(r,c)=>{ ctx.fillStyle=c; ctx.fillRect(SX(r.x),SY(r.y),S(r.w),S(r.h));
+    ctx.fillStyle='rgba(255,255,255,0.12)'; ctx.fillRect(SX(r.x),SY(r.y),S(r.w),S(2)); };
+  sc.blocks.forEach((b, i) => { if (!st.erased[i]) blk(b, '#7a5a8f'); });
+  sc.doors.forEach(d => blk(d, '#d24b4b'));
+  goalMark(sc.goal, '#ffd76a');
   drawFigurePixel();
 }
 function pxSeg(x1,y1,x2,y2,c){ ctx.fillStyle=c; ctx.fillRect(SX(x1),SY(Math.min(y1,y2)),S(x2-x1),S(Math.abs(y2-y1)+4)); }
 
-function goalMark(col){
-  const g=E.GOAL; const t=performance.now()/1000;
+function goalMark(g, col){
+  const t=performance.now()/1000;
   ctx.save(); ctx.globalAlpha=0.5+0.3*Math.sin(t*3); ctx.strokeStyle=col; ctx.lineWidth=2;
   ctx.strokeRect(SX(g.x),SY(g.y),S(g.w),S(g.h));
   ctx.globalAlpha=0.85; ctx.fillStyle=col; ctx.font=`${Math.round(S(6))}px ui-monospace`; ctx.textAlign='center';
@@ -340,8 +374,8 @@ function goalMark(col){
 function glowRect(r){ ctx.save(); ctx.strokeStyle='rgba(255,235,150,0.8)'; ctx.lineWidth=2;
   ctx.shadowColor='rgba(255,225,120,0.9)'; ctx.shadowBlur=12;
   ctx.strokeRect(SX(r.x),SY(r.y),S(r.w),S(r.h)); ctx.restore(); }
-function touchingBlock(){ for (const p of pointers.values()){ const s=toScene(p.x,p.y);
-  if (s.x>E.BLOCK.x-4&&s.x<E.BLOCK.x+E.BLOCK.w+4&&s.y>E.BLOCK.y-4&&s.y<E.BLOCK.y+E.BLOCK.h+4) return true;} return false; }
+function touchingBlock(b){ for (const p of pointers.values()){ const s=toScene(p.x,p.y);
+  if (s.x>b.x-4&&s.x<b.x+b.w+4&&s.y>b.y-4&&s.y<b.y+b.h+4) return true;} return false; }
 
 function drawFigureCharcoal(){
   const f=st.fig; ctx.save();
@@ -391,11 +425,25 @@ function wrap(text,cx,y,maxw,lh){ const words=text.split(' '); let line='',yy=y;
   ctx.fillText(line,cx,yy); ctx.textAlign='left'; }
 function hint(){
   if (st.won) return 'Finished. Tap to return — the gallery has changed.';
-  if (st.snapped && st.erased && st.style==='pixel') return 'The door is a solid slab in pixel. Which style makes it a passable outline?';
-  if (st.snapped && st.style==='charcoal' && !st.erased) return 'Only linework is solid here — rub away the inked block.';
-  if (st.erased && !st.snapped) return 'The gap is an erased hole in charcoal. Find the style that fills it.';
-  if (st.style==='pixel' && !st.snapped) return 'Pixel quantizes the world. Tap the shimmering gap to snap it solid.';
-  return 'Two ways to draw this scene. Switch styles, set a state in one, exploit it in the other.';
+  if (st.sceneId === 'lantern'){
+    const snapped = st.snapped[0], erased = st.erased[0];
+    if (snapped && erased && st.style==='pixel') return 'The door is a solid slab in pixel. Which style makes it a passable outline?';
+    if (snapped && st.style==='charcoal' && !erased) return 'Only linework is solid here — rub away the inked block.';
+    if (erased && !snapped) return 'The gap is an erased hole in charcoal. Find the style that fills it.';
+    if (st.style==='pixel' && !snapped) return 'Pixel quantizes the world. Tap the shimmering gap to snap it solid.';
+    return 'Two ways to draw this scene. Switch styles, set a state in one, exploit it in the other.';
+  }
+  if (st.sceneId === 'relit'){
+    const [eA, eB] = st.erased, [snap] = st.snapped;
+    if (!eA && st.style==='pixel')                 return 'Pixel won\'t erase the block. Switch styles.';
+    if (!eA)                                       return 'Rub the upper block to send the Figure falling.';
+    if (eA && !snap && st.style==='charcoal')      return 'The wide gap is a fatal hole in charcoal. Try the other style.';
+    if (eA && !snap && st.style==='pixel')         return 'Tap the shimmering gap to snap a long ramp.';
+    if (snap && !eB && st.style==='pixel')         return 'A second block stops the Figure. Charcoal erases it.';
+    if (snap && !eB)                               return 'Almost — rub the lower block to clear the goal.';
+    return 'Read each station in the right style. Rub, snap, rub.';
+  }
+  return '';
 }
 function renderToast(){
   if (toastT<=0) return;
