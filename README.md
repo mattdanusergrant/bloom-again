@@ -10,9 +10,8 @@ GDD: `03_creating/game-ideas/bloom-again.md`.
 
 ## Play
 
-- **Live (GitHub Pages):** enable once via repo *Settings → Pages → Source = "GitHub Actions"*,
-  then it deploys on every push that touches `web/`. Only this folder is published.
-- **Local:** `cd web && python3 -m http.server` → open `http://localhost:8000`
+- **Live (GitHub Pages):** https://mattdanusergrant.github.io/bloom-again/ — served from `main`/root.
+- **Local:** `python3 -m http.server` → open `http://localhost:8000`
   (needs a server, not `file://`, because `index.html` imports `engine.js` as a module).
 
 ## The Lantern Frame (how to solve)
@@ -34,10 +33,10 @@ Desktop: `s` switch · `r` reset · drag to rub · click to tap.
 
 ## Layout
 
-- `web/engine.js` — pure, DOM-free: scene-as-data, `solidity = f(geometry, style)`,
+- `engine.js` — pure, DOM-free: scene-as-data, `solidity = f(geometry, style)`,
   the carried-Figure physics, and the two gestures. No rendering.
-- `web/index.html` — canvas renderer + touch input; imports the engine.
-- `web/engine.test.mjs` — headless solvability proof. Run: `node web/engine.test.mjs`.
+- `index.html` — canvas renderer + touch input; imports the engine.
+- `engine.test.mjs` — headless solvability proof. Run: `node engine.test.mjs`.
 
 ## Built / not built
 
