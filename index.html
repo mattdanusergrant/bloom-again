@@ -374,9 +374,10 @@ function renderHUD(){
   ctx.restore();
   ctx.textAlign='left'; ctx.fillStyle='#7c766c'; ctx.font='11px ui-monospace';
   ctx.fillText('tap ⟳  ·  two-finger swipe', b.x+8, cy+b.r+14);
-  // hint ladder
+  // hint ladder — center in the band between wheel label (left) and buttons (right)
   ctx.fillStyle='#cfc9bd'; ctx.font=`${Math.min(15,W*0.033)}px ui-monospace`; ctx.textAlign='center';
-  wrap(hint(), W/2+20, H-hudH+30, W*0.62, 18);
+  const hintL = 120, hintR = W - 120;
+  wrap(hint(), (hintL+hintR)/2, H-hudH+30, Math.max(120, hintR-hintL), 18);
   // buttons
   btn(backBtn(),'menu'); btn(resetBtn(),'↺');
 }
